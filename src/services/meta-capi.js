@@ -1,3 +1,5 @@
+import { createHash } from 'crypto';
+
 const META_API_VERSION = 'v19.0';
 
 export async function sendToMetaCAPI(event) {
@@ -52,10 +54,6 @@ export function buildMetaEvent({ eventName, eventId, userData, customData, sourc
   return event;
 }
 
-// SHA256 no servidor (para email/telefone vindos da Hotmart)
-export async function sha256(str) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(str);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+export function sha256(str) {
+  return createHash('sha256').update(str).digest('hex');
 }
