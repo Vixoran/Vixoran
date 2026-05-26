@@ -1,4 +1,31 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+CREATE TABLE IF NOT EXISTS touchpoints (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  vid                   VARCHAR(64),
+  user_hash             VARCHAR(64),
+  session_id            VARCHAR(100),
+  channel               VARCHAR(50),
+  source                VARCHAR(100),
+  medium                VARCHAR(100),
+  campaign              VARCHAR(200),
+  campaign_id           VARCHAR(100),
+  ad_id                 VARCHAR(100),
+  gclid                 VARCHAR(200),
+  fbclid                VARCHAR(200),
+  fbp                   VARCHAR(100),
+  fbc                   VARCHAR(100),
+  is_brand_search       BOOLEAN DEFAULT false,
+  scroll_depth_max      INT DEFAULT 0,
+  time_active_seconds   INT DEFAULT 0,
+  video_completion_pct  INT DEFAULT 0,
+  cta_clicked           BOOLEAN DEFAULT false,
+  landing_page          TEXT,
+  referrer              TEXT,
+  user_agent            TEXT,
+  touched_at            TIMESTAMPTZ DEFAULT NOW()
+);
+
 ALTER TABLE touchpoints ADD COLUMN IF NOT EXISTS user_hash VARCHAR(64);
 ALTER TABLE touchpoints ADD COLUMN IF NOT EXISTS vid VARCHAR(64);
 ALTER TABLE touchpoints ADD COLUMN IF NOT EXISTS session_id VARCHAR(100);
@@ -21,32 +48,6 @@ ALTER TABLE touchpoints ADD COLUMN IF NOT EXISTS landing_page TEXT;
 ALTER TABLE touchpoints ADD COLUMN IF NOT EXISTS referrer TEXT;
 ALTER TABLE touchpoints ADD COLUMN IF NOT EXISTS user_agent TEXT;
 
-CREATE TABLE IF NOT EXISTS touchpoints (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  vid           VARCHAR(64),
-  user_hash     VARCHAR(64),
-  session_id    VARCHAR(100),
-  channel       VARCHAR(50),
-  source        VARCHAR(100),
-  medium        VARCHAR(100),
-  campaign      VARCHAR(200),
-  campaign_id   VARCHAR(100),
-  ad_id         VARCHAR(100),
-  gclid         VARCHAR(200),
-  fbclid        VARCHAR(200),
-  fbp           VARCHAR(100),
-  fbc           VARCHAR(100),
-  is_brand_search   BOOLEAN DEFAULT false,
-  scroll_depth_max      INT DEFAULT 0,
-  time_active_seconds   INT DEFAULT 0,
-  video_completion_pct  INT DEFAULT 0,
-  cta_clicked           BOOLEAN DEFAULT false,
-  landing_page  TEXT,
-  referrer      TEXT,
-  user_agent    TEXT,
-  touched_at    TIMESTAMPTZ DEFAULT NOW()
-);
-
 CREATE TABLE IF NOT EXISTS events (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   event_id      VARCHAR(100) UNIQUE,
@@ -65,17 +66,17 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE TABLE IF NOT EXISTS engagement_sessions (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  vid           VARCHAR(64),
-  session_id    VARCHAR(100),
-  page          TEXT,
-  total_time_ms INT,
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  vid                   VARCHAR(64),
+  session_id            VARCHAR(100),
+  page                  TEXT,
+  total_time_ms         INT,
   scroll_depth_max      INT DEFAULT 0,
   time_active_seconds   INT DEFAULT 0,
   video_completion_pct  INT DEFAULT 0,
   cta_clicked           BOOLEAN DEFAULT false,
-  engagements   JSONB,
-  created_at    TIMESTAMPTZ DEFAULT NOW()
+  engagements           JSONB,
+  created_at            TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS purchases (
