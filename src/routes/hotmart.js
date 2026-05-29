@@ -5,23 +5,19 @@ import { calculateAttribution } from '../services/attribution.js';
 const BRAND_TERMS = (process.env.BRAND_TERMS || '').toLowerCase().split(',').filter(Boolean);
 
 const campaignNameCache = {};
-const adsetNameCache = {};
-const adNameCache = {};
 
-async function resolveMetaName(type, id) {
+async function resolveMetaName(id) {
   if (!id) return null;
-  const cache = type === 'campaign' ? campaignNameCache :
-                type === 'adset' ? adsetNameCache : adNameCache;
-  if (cache[id]) return cache[id];
+  if (campaignNameCache[id]) return campaignNameCache[id];
   const ACCESS_TOKEN = process.env.META_ACCESS_TOKEN;
   if (!ACCESS_TOKEN) return id;
   try {
     const res = await fetch(
-      https://graph.facebook.com/v19.0/${id}?fields=name&access_token=${ACCESS_TOKEN}
+      'https://graph.facebook.com/v19.0/' + id + '?fields=name&access_token=' + ACCESS_TOKEN
     );
     const data = await res.json();
     if (data.name) {
-      cache[id] = data.name;
+      campaignNameCache[id] = data.name;
       return data.name;
     }
   } catch (e) {}
@@ -41,7 +37,7 @@ export async function hotmartRoutes(fastify) {
       payload?.data?.purchase?.status === 'COMPLETE';
 
     if (!isApproved) {
-      console.log(Hotmart evento ignorado: ${eventType});
+      console.log('Hotmart evento ignorado: ' + eventType);
       return reply.send({ ok: true, ignored: true });
     }
 
@@ -72,12 +68,8 @@ export async function hotmartRoutes(fastify) {
     const isNumericCampaign = /^\d+$/.test(utmCampaign);
 
     if (isNumericCampaign) {
-      const [campaignName] = await Promise.all([
-        resolveMetaName('campaign', utmCampaign),
-        resolveMetaName('adset', adsetId),
-        resolveMetaName('ad', adId),
-      ]);
-      utmCampaign = campaignName || utmCampaign;
+      const resolved = await resolveMetaName(utmCampaign);
+      utmCampaign = resolved || utmCampaign;
     }
 
     const channel       = detectChannel({ utmSource, utmMedium, fbclid, gclid });
@@ -85,16 +77,16 @@ export async function hotmartRoutes(fastify) {
     const emailHash     = email ? await sha256(email) : null;
 
     const { rows } = await db.query(
-      `INSERT INTO purchases (
-        hotmart_transaction, product_id, product_name,
-        buyer_email_hash, buyer_name, revenue, currency,
-        utm_source, utm_medium, utm_campaign, utm_content, utm_term,
-        fbclid, fbp, gclid,
-        channel, is_brand_search,
-        raw_payload
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
-      ON CONFLICT (hotmart_transaction) DO NOTHING
-      RETURNING id`,
+      'INSERT INTO purchases (' +
+      'hotmart_transaction, product_id, product_name,' +
+      'buyer_email_hash, buyer_name, revenue, currency,' +
+      'utm_source, utm_medium, utm_campaign, utm_content, utm_term,' +
+      'fbclid, fbp, gclid,' +
+      'channel, is_brand_search,' +
+      'raw_payload' +
+      ') VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)' +
+      ' ON CONFLICT (hotmart_transaction) DO NOTHING' +
+      ' RETURNING id',
       [
         transaction, productId, productName,
         emailHash, name, revenue, currency,
@@ -106,7 +98,7 @@ export async function hotmartRoutes(fastify) {
     );
 
     if (rows.length === 0) {
-      console.log(Transação duplicada ignorada: ${transaction});
+      console.log('Transacao duplicada ignorada: ' + transaction);
       return reply.send({ ok: true, duplicate: true });
     }
 
@@ -114,14 +106,14 @@ export async function hotmartRoutes(fastify) {
 
     if (Object.keys(attribution).length > 0) {
       await db.query(
-        UPDATE purchases SET attribution = $1 WHERE hotmart_transaction = $2,
+        'UPDATE purchases SET attribution = $1 WHERE hotmart_transaction = $2',
         [attribution, transaction]
       );
     }
 
     const metaEvent = buildMetaEvent({
       eventName: 'Purchase',
-      eventId: hotmart_${transaction},
+      eventId: 'hotmart_' + transaction,
       userData: { em: emailHash, fbp, fbc: fbclid },
       customData: {
         value: revenue,
@@ -138,12 +130,11 @@ export async function hotmartRoutes(fastify) {
     const metaResult = await sendToMetaCAPI(metaEvent);
 
     await db.query(
-      `UPDATE purchases SET meta_capi_sent = true, meta_capi_response = $1
-       WHERE hotmart_transaction = $2`,
+      'UPDATE purchases SET meta_capi_sent = true, meta_capi_response = $1 WHERE hotmart_transaction = $2',
       [metaResult, transaction]
     );
 
-    console.log(✅ Compra: ${transaction} | ${channel} | ${utmCampaign} | R$ ${revenue});
+    console.log('Compra: ' + transaction + ' | ' + channel + ' | ' + utmCampaign + ' | R$ ' + revenue);
     return reply.send({ ok: true, channel, campaign: utmCampaign, attribution });
   });
 }
