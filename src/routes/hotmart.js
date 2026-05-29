@@ -59,10 +59,10 @@ export async function hotmartRoutes(fastify) {
     const utmContent  = tracking.content || tracking.utm_content || '';
     const utmTerm     = tracking.term || tracking.utm_term || '';
     const fbclid      = tracking.fbclid || '';
-    const fbp         = tracking.fbp || '';
     const gclid       = tracking.gclid || '';
-    const adsetId     = tracking.adset_id || '';
-    const adId        = tracking.ad_id || tracking.h_ad_id || '';
+
+    // fbp vem no campo src que injetamos no link do Hotmart
+    const fbp = tracking.source_sck || tracking.src || '';
 
     let utmCampaign = tracking.campaign || tracking.utm_campaign || '';
     const isNumericCampaign = /^\d+$/.test(utmCampaign);
@@ -98,7 +98,7 @@ export async function hotmartRoutes(fastify) {
     );
 
     if (rows.length === 0) {
-      console.log('Transacao duplicada ignorada: ' + transaction);
+      console.log('Transacao duplicada: ' + transaction);
       return reply.send({ ok: true, duplicate: true });
     }
 
