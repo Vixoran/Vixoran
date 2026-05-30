@@ -61,6 +61,9 @@ export async function hotmartRoutes(fastify) {
     const fbclid      = tracking.fbclid || '';
     const gclid       = tracking.gclid || '';
 
+    // VID vem no parâmetro _vx_vid que o tracker injeta nos links
+    const vid = tracking._vx_vid || '';
+
     // fbp vem no campo src que injetamos no link do Hotmart
     const fbp = tracking.source_sck || tracking.src || '';
 
@@ -90,7 +93,7 @@ export async function hotmartRoutes(fastify) {
       [
         transaction, productId, productName,
         emailHash, name, revenue, currency,
-        utmSource, utmMedium, utmCampaign, utmContent, utmTerm,
+        utmSource, utmMedium, utmCampaign, utmContent, vid || utmTerm,
         fbclid, fbp, gclid,
         channel, isBrandSearch,
         payload,
