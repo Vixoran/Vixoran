@@ -54,6 +54,8 @@ export async function hotmartRoutes(fastify) {
     const productName = product.name || '';
 
     const tracking = purchase.tracking || payload?.data?.tracking || {};
+    const origin   = purchase.origin   || payload?.data?.purchase?.origin || {};
+
     const utmSource   = tracking.source_sck || tracking.utm_source || '';
     const utmMedium   = tracking.medium || tracking.utm_medium || '';
     const utmContent  = tracking.content || tracking.utm_content || '';
@@ -61,11 +63,14 @@ export async function hotmartRoutes(fastify) {
     const fbclid      = tracking.fbclid || '';
     const gclid       = tracking.gclid || '';
 
-    // VID vem no parâmetro _vx_vid que o tracker injeta nos links
-    const vid = tracking._vx_vid || '';
+    // sck identifica origem do clique (IG = Instagram Stories, FB = Facebook, etc)
+    const sck = origin.sck || tracking.sck || tracking.source_sck || '';
 
-    // fbp vem no campo src que injetamos no link do Hotmart
-    const fbp = tracking.source_sck || tracking.src || '';
+    // VID vem no utm_content quando o tracker injeta
+    const vid = (utmContent && utmContent.startsWith('v_')) ? utmContent : '';
+
+    // fbp vem no campo src
+    const fbp = tracking.src || '';
 
     let utmCampaign = tracking.campaign || tracking.utm_campaign || '';
     const isNumericCampaign = /^\d+$/.test(utmCampaign);
@@ -75,9 +80,12 @@ export async function hotmartRoutes(fastify) {
       utmCampaign = resolved || utmCampaign;
     }
 
-    const channel       = detectChannel({ utmSource, utmMedium, fbclid, gclid });
+    const channel       = detectChannel({ utmSource, utmMedium, fbclid, gclid, sck });
     const isBrandSearch = detectBrandSearch({ utmSource, utmMedium, utmTerm });
     const emailHash     = email ? await sha256(email) : null;
+
+    // Usa vid se disponível, senão utm_term original
+    const termToSave = vid || utmTerm;
 
     const { rows } = await db.query(
       'INSERT INTO purchases (' +
@@ -93,7 +101,7 @@ export async function hotmartRoutes(fastify) {
       [
         transaction, productId, productName,
         emailHash, name, revenue, currency,
-        utmSource, utmMedium, utmCampaign, utmContent, vid || utmTerm,
+        utmSource, utmMedium, utmCampaign, utmContent, termToSave,
         fbclid, fbp, gclid,
         channel, isBrandSearch,
         payload,
@@ -137,17 +145,27 @@ export async function hotmartRoutes(fastify) {
       [metaResult, transaction]
     );
 
-    console.log('Compra: ' + transaction + ' | ' + channel + ' | ' + utmCampaign + ' | R$ ' + revenue);
+    console.log('Compra: ' + transaction + ' | ' + channel + ' | ' + utmCampaign + ' | sck:' + sck + ' | R$ ' + revenue);
     return reply.send({ ok: true, channel, campaign: utmCampaign, attribution });
   });
 }
 
-function detectChannel({ utmSource, utmMedium, fbclid, gclid }) {
+function detectChannel({ utmSource, utmMedium, fbclid, gclid, sck }) {
   if (fbclid) return 'meta';
   if (gclid)  return 'google';
+
+  // sck identifica origem específica
+  if (sck) {
+    if (sck.startsWith('IG')) return 'meta'; // Instagram Stories
+    if (sck.startsWith('FB')) return 'meta'; // Facebook
+    if (sck.startsWith('YT')) return 'other'; // YouTube
+    if (sck.startsWith('WA')) return 'other'; // WhatsApp
+  }
+
   const src = utmSource.toLowerCase();
   const med = utmMedium.toLowerCase();
-  if (src.includes('facebook') || src.includes('instagram') || src.includes('meta')) return 'meta';
+
+  if (src.includes('facebook') || src.includes('instagram') || src.includes('meta') || src === 'fb' || src === 'ig') return 'meta';
   if (src.includes('google') || src.includes('bing')) return 'google';
   if (med === 'email') return 'email';
   if (med === 'organic') return 'organic';
