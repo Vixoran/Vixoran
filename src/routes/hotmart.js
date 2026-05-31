@@ -66,9 +66,9 @@ export async function hotmartRoutes(fastify) {
     // sck identifica origem do clique (IG = Instagram Stories, FB = Facebook, etc)
     const sck = origin.sck || tracking.sck || tracking.source_sck || '';
 
-    // src pode trazer "fbp|vid". Separa os dois.
+    // src pode trazer "fbp_VID_vid". Separa os dois.
     const rawSrc = tracking.src || '';
-    const srcParts = rawSrc.split('|');
+    const srcParts = rawSrc.split('_VID_');
     const fbp = srcParts[0] || '';
     const vidFromSrc = srcParts[1] || '';
 
