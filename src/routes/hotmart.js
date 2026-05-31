@@ -24,6 +24,26 @@ async function resolveMetaName(id) {
   return id;
 }
 
+// Extrai o VID (v_...) de uma string que pode ter o prefixo _VID_ ou não
+function extractVid(str) {
+  if (!str) return '';
+  // se tem _VID_, pega o que vem depois
+  const idx = str.indexOf('_VID_');
+  if (idx !== -1) {
+    const after = str.slice(idx + 5); // 5 = tamanho de "_VID_"
+    return after.startsWith('v_') ? after : '';
+  }
+  // senão, aceita se a string inteira já é um v_
+  return str.startsWith('v_') ? str : '';
+}
+
+// Remove o trecho _VID_v_... de uma string, devolvendo o que sobra (ex: fbp puro)
+function stripVid(str) {
+  if (!str) return '';
+  const idx = str.indexOf('_VID_');
+  return idx !== -1 ? str.slice(0, idx) : str;
+}
+
 export async function hotmartRoutes(fastify) {
 
   fastify.post('/hotmart/webhook', async (req, reply) => {
@@ -59,21 +79,22 @@ export async function hotmartRoutes(fastify) {
     const utmSource   = tracking.source_sck || tracking.utm_source || '';
     const utmMedium   = tracking.medium || tracking.utm_medium || '';
     const utmContent  = tracking.content || tracking.utm_content || '';
-    const utmTerm     = tracking.term || tracking.utm_term || '';
+    const rawUtmTerm  = tracking.term || tracking.utm_term || '';
     const fbclid      = tracking.fbclid || '';
     const gclid       = tracking.gclid || '';
 
     // sck identifica origem do clique (IG = Instagram Stories, FB = Facebook, etc)
     const sck = origin.sck || tracking.sck || tracking.source_sck || '';
 
-    // src pode trazer "fbp_VID_vid". Separa os dois.
+    // O VID pode chegar no src OU no utm_term, com prefixo _VID_. Procura nos dois.
     const rawSrc = tracking.src || '';
-    const srcParts = rawSrc.split('_VID_');
-    const fbp = srcParts[0] || '';
-    const vidFromSrc = srcParts[1] || '';
+    const vid = extractVid(rawSrc) || extractVid(rawUtmTerm) || extractVid(utmContent);
 
-    // VID: primeiro tenta do src, senão do utm_content (compatível com o antigo)
-    const vid = vidFromSrc || ((utmContent && utmContent.startsWith('v_')) ? utmContent : '');
+    // fbp = src sem a parte do VID
+    const fbp = stripVid(rawSrc);
+
+    // utm_term limpo: se tinha _VID_, remove; senão mantém o original
+    const utmTerm = stripVid(rawUtmTerm);
 
     let utmCampaign = tracking.campaign || tracking.utm_campaign || '';
     const isNumericCampaign = /^\d+$/.test(utmCampaign);
@@ -87,7 +108,7 @@ export async function hotmartRoutes(fastify) {
     const isBrandSearch = detectBrandSearch({ utmSource, utmMedium, utmTerm });
     const emailHash     = email ? await sha256(email) : null;
 
-    // Usa vid se disponível, senão utm_term original
+    // Salva o vid se tiver, senão o utm_term limpo
     const termToSave = vid || utmTerm;
 
     const { rows } = await db.query(
@@ -148,8 +169,8 @@ export async function hotmartRoutes(fastify) {
       [metaResult, transaction]
     );
 
-    console.log('Compra: ' + transaction + ' | ' + channel + ' | ' + utmCampaign + ' | sck:' + sck + ' | R$ ' + revenue);
-    return reply.send({ ok: true, channel, campaign: utmCampaign, attribution });
+    console.log('Compra: ' + transaction + ' | ' + channel + ' | ' + utmCampaign + ' | sck:' + sck + ' | vid:' + vid + ' | R$ ' + revenue);
+    return reply.send({ ok: true, channel, campaign: utmCampaign, vid, attribution });
   });
 }
 
@@ -157,24 +178,19 @@ function detectChannel({ utmSource, utmMedium, fbclid, gclid, sck }) {
   const src = (utmSource || '').toLowerCase();
   const med = (utmMedium || '').toLowerCase();
 
-  // fbclid é prova forte de Meta
   if (fbclid) return 'meta';
 
-  // sck identifica origem específica (vem da Hotmart)
   if (sck) {
-    if (sck.startsWith('IG')) return 'meta';   // Instagram
-    if (sck.startsWith('FB')) return 'meta';   // Facebook
-    if (sck.startsWith('YT')) return 'other';  // YouTube
-    if (sck.startsWith('WA')) return 'other';  // WhatsApp
+    if (sck.startsWith('IG')) return 'meta';
+    if (sck.startsWith('FB')) return 'meta';
+    if (sck.startsWith('YT')) return 'other';
+    if (sck.startsWith('WA')) return 'other';
   }
 
-  // UTM de Meta
   if (src.includes('facebook') || src.includes('instagram') || src.includes('meta') || src === 'fb' || src === 'ig') return 'meta';
 
-  // gclid só vira google se a fonte NÃO contradiz (evita gclid sujo em links direct)
   if (gclid && src !== 'direct') return 'google';
 
-  // UTM de Google
   if (src.includes('google') || src.includes('bing')) return 'google';
 
   if (med === 'email') return 'email';
