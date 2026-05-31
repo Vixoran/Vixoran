@@ -66,11 +66,14 @@ export async function hotmartRoutes(fastify) {
     // sck identifica origem do clique (IG = Instagram Stories, FB = Facebook, etc)
     const sck = origin.sck || tracking.sck || tracking.source_sck || '';
 
-    // VID vem no utm_content quando o tracker injeta
-    const vid = (utmContent && utmContent.startsWith('v_')) ? utmContent : '';
+    // src pode trazer "fbp|vid". Separa os dois.
+    const rawSrc = tracking.src || '';
+    const srcParts = rawSrc.split('|');
+    const fbp = srcParts[0] || '';
+    const vidFromSrc = srcParts[1] || '';
 
-    // fbp vem no campo src
-    const fbp = tracking.src || '';
+    // VID: primeiro tenta do src, senão do utm_content (compatível com o antigo)
+    const vid = vidFromSrc || ((utmContent && utmContent.startsWith('v_')) ? utmContent : '');
 
     let utmCampaign = tracking.campaign || tracking.utm_campaign || '';
     const isNumericCampaign = /^\d+$/.test(utmCampaign);
@@ -151,22 +154,29 @@ export async function hotmartRoutes(fastify) {
 }
 
 function detectChannel({ utmSource, utmMedium, fbclid, gclid, sck }) {
-  if (fbclid) return 'meta';
-  if (gclid)  return 'google';
+  const src = (utmSource || '').toLowerCase();
+  const med = (utmMedium || '').toLowerCase();
 
-  // sck identifica origem específica
+  // fbclid é prova forte de Meta
+  if (fbclid) return 'meta';
+
+  // sck identifica origem específica (vem da Hotmart)
   if (sck) {
-    if (sck.startsWith('IG')) return 'meta'; // Instagram Stories
-    if (sck.startsWith('FB')) return 'meta'; // Facebook
-    if (sck.startsWith('YT')) return 'other'; // YouTube
-    if (sck.startsWith('WA')) return 'other'; // WhatsApp
+    if (sck.startsWith('IG')) return 'meta';   // Instagram
+    if (sck.startsWith('FB')) return 'meta';   // Facebook
+    if (sck.startsWith('YT')) return 'other';  // YouTube
+    if (sck.startsWith('WA')) return 'other';  // WhatsApp
   }
 
-  const src = utmSource.toLowerCase();
-  const med = utmMedium.toLowerCase();
-
+  // UTM de Meta
   if (src.includes('facebook') || src.includes('instagram') || src.includes('meta') || src === 'fb' || src === 'ig') return 'meta';
+
+  // gclid só vira google se a fonte NÃO contradiz (evita gclid sujo em links direct)
+  if (gclid && src !== 'direct') return 'google';
+
+  // UTM de Google
   if (src.includes('google') || src.includes('bing')) return 'google';
+
   if (med === 'email') return 'email';
   if (med === 'organic') return 'organic';
   if (src) return 'other';
