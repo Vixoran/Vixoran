@@ -105,6 +105,30 @@ export async function metaAdsRoutes(fastify) {
       const datePreset = req.body?.date_preset || 'today';
       const rows = await fetchAllMetaInsights({ datePreset });
 
+      if (rows.length === 0) {
+        return reply.send({
+          ok: true,
+          date_preset: datePreset,
+          rows_received: 0,
+          rows_deleted: 0,
+          rows_inserted: 0
+        });
+      }
+
+      const dates = [...new Set(rows.map(row => row.date_start).filter(Boolean))];
+
+      let deleted = 0;
+
+      for (const date of dates) {
+        const deleteResult = await db.query(
+          `DELETE FROM meta_ad_insights
+           WHERE date_start = $1`,
+          [date]
+        );
+
+        deleted += deleteResult.rowCount || 0;
+      }
+
       let inserted = 0;
 
       for (const row of rows) {
@@ -176,7 +200,9 @@ export async function metaAdsRoutes(fastify) {
       return reply.send({
         ok: true,
         date_preset: datePreset,
+        dates_synced: dates,
         rows_received: rows.length,
+        rows_deleted: deleted,
         rows_inserted: inserted
       });
     } catch (err) {
