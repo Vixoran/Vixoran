@@ -31,6 +31,20 @@ async function resolveMetaName(id) {
   return id;
 }
 
+function clean(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+function firstFilled(...values) {
+  for (const value of values) {
+    const cleaned = clean(value);
+    if (cleaned) return cleaned;
+  }
+
+  return '';
+}
+
 // Extrai o VID (v_...) de uma string que pode ter o prefixo _VID_ ou não
 function extractVid(str) {
   if (!str) return '';
@@ -40,7 +54,7 @@ function extractVid(str) {
   const idx = value.indexOf('_VID_');
 
   if (idx !== -1) {
-    const after = value.slice(idx + 5); // 5 = tamanho de "_VID_"
+    const after = value.slice(idx + 5);
     return after.startsWith('v_') ? after : '';
   }
 
@@ -55,20 +69,6 @@ function stripVid(str) {
   const idx = value.indexOf('_VID_');
 
   return idx !== -1 ? value.slice(0, idx) : value;
-}
-
-function clean(value) {
-  if (value === null || value === undefined) return '';
-  return String(value).trim();
-}
-
-function firstFilled(...values) {
-  for (const value of values) {
-    const cleaned = clean(value);
-    if (cleaned) return cleaned;
-  }
-
-  return '';
 }
 
 function getTrackingObjects(payload, purchase) {
@@ -95,6 +95,80 @@ function getTrackingObjects(payload, purchase) {
   return { tracking, origin, checkout };
 }
 
+function findDeepValue(obj, keys = [], maxDepth = 8) {
+  if (!obj || typeof obj !== 'object' || maxDepth < 0) return '';
+
+  const wanted = keys.map(k => k.toLowerCase());
+
+  for (const [key, value] of Object.entries(obj)) {
+    if (wanted.includes(String(key).toLowerCase())) {
+      const cleaned = clean(value);
+      if (cleaned) return cleaned;
+    }
+  }
+
+  for (const value of Object.values(obj)) {
+    if (value && typeof value === 'object') {
+      const found = findDeepValue(value, keys, maxDepth - 1);
+      if (found) return found;
+    }
+  }
+
+  return '';
+}
+
+function collectDeepStrings(obj, maxDepth = 8, output = []) {
+  if (obj === null || obj === undefined || maxDepth < 0) return output;
+
+  if (typeof obj === 'string') {
+    output.push(obj);
+    return output;
+  }
+
+  if (typeof obj !== 'object') return output;
+
+  for (const value of Object.values(obj)) {
+    collectDeepStrings(value, maxDepth - 1, output);
+  }
+
+  return output;
+}
+
+function extractQueryParamFromText(text, param) {
+  if (!text) return '';
+
+  const value = String(text);
+
+  try {
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      const url = new URL(value);
+      return clean(url.searchParams.get(param));
+    }
+  } catch (e) {}
+
+  const regex = new RegExp(`[?&]${param}=([^&#\\s]+)`, 'i');
+  const match = value.match(regex);
+
+  if (!match?.[1]) return '';
+
+  try {
+    return decodeURIComponent(match[1]);
+  } catch (e) {
+    return match[1];
+  }
+}
+
+function findQueryParamAnywhere(payload, param) {
+  const strings = collectDeepStrings(payload);
+
+  for (const text of strings) {
+    const found = extractQueryParamFromText(text, param);
+    if (found) return found;
+  }
+
+  return '';
+}
+
 function extractSck({ tracking, origin, checkout, payload }) {
   return firstFilled(
     origin.sck,
@@ -108,7 +182,20 @@ function extractSck({ tracking, origin, checkout, payload }) {
     checkout.SCK,
 
     payload?.data?.sck,
-    payload?.sck
+    payload?.sck,
+
+    findDeepValue(payload, ['sck', 'SCK', 'source_sck']),
+    findQueryParamAnywhere(payload, 'sck')
+  );
+}
+
+function extractParam({ tracking, origin, checkout, payload, keys = [], queryParam }) {
+  return firstFilled(
+    ...keys.map(key => tracking?.[key]),
+    ...keys.map(key => origin?.[key]),
+    ...keys.map(key => checkout?.[key]),
+    findDeepValue(payload, keys),
+    queryParam ? findQueryParamAnywhere(payload, queryParam) : ''
   );
 }
 
@@ -118,6 +205,31 @@ function buildCheckoutParams({ tracking, origin, checkout }) {
     origin,
     checkout
   };
+}
+
+function classifySck(sck) {
+  const value = (sck || '').toLowerCase();
+
+  if (!value) return 'sem_sck';
+
+  if (value.includes('ig_bio') || value.includes('bio')) return 'instagram_bio';
+  if (value.includes('ig_story') || value.includes('story')) return 'instagram_story';
+  if (value.includes('ig_dm') || value.includes('direct')) return 'instagram_dm';
+
+  if (value.startsWith('ig')) return 'instagram';
+  if (value.startsWith('fb')) return 'facebook';
+  if (value.startsWith('meta')) return 'meta';
+  if (value.startsWith('an')) return 'meta_audience_network';
+
+  if (value.startsWith('gg') || value.startsWith('google')) return 'google';
+
+  if (value.startsWith('wa') || value.startsWith('wpp') || value.includes('whatsapp')) {
+    return 'whatsapp';
+  }
+
+  if (value.startsWith('yt') || value.includes('youtube')) return 'youtube';
+
+  return 'outro_sck';
 }
 
 export async function hotmartRoutes(fastify) {
@@ -154,45 +266,68 @@ export async function hotmartRoutes(fastify) {
     const { tracking, origin, checkout } = getTrackingObjects(payload, purchase);
 
     const sck = extractSck({ tracking, origin, checkout, payload });
+    const sckType = classifySck(sck);
 
     const utmSource = firstFilled(
       tracking.utm_source,
       tracking.source,
-      tracking.source_sck
+      tracking.source_sck,
+      origin.utm_source,
+      checkout.utm_source,
+      findDeepValue(payload, ['utm_source', 'source']),
+      findQueryParamAnywhere(payload, 'utm_source')
     );
 
     const utmMedium = firstFilled(
       tracking.utm_medium,
-      tracking.medium
+      tracking.medium,
+      origin.utm_medium,
+      checkout.utm_medium,
+      findDeepValue(payload, ['utm_medium', 'medium']),
+      findQueryParamAnywhere(payload, 'utm_medium')
     );
 
     const utmContent = firstFilled(
       tracking.utm_content,
-      tracking.content
+      tracking.content,
+      origin.utm_content,
+      checkout.utm_content,
+      findDeepValue(payload, ['utm_content', 'content']),
+      findQueryParamAnywhere(payload, 'utm_content')
     );
 
     const rawUtmTerm = firstFilled(
       tracking.utm_term,
-      tracking.term
+      tracking.term,
+      origin.utm_term,
+      checkout.utm_term,
+      findDeepValue(payload, ['utm_term', 'term']),
+      findQueryParamAnywhere(payload, 'utm_term')
     );
 
     const fbclid = firstFilled(
       tracking.fbclid,
       origin.fbclid,
-      checkout.fbclid
+      checkout.fbclid,
+      findDeepValue(payload, ['fbclid']),
+      findQueryParamAnywhere(payload, 'fbclid')
     );
 
     const gclid = firstFilled(
       tracking.gclid,
       origin.gclid,
-      checkout.gclid
+      checkout.gclid,
+      findDeepValue(payload, ['gclid']),
+      findQueryParamAnywhere(payload, 'gclid')
     );
 
-    // O VID pode chegar no src OU no utm_term, com prefixo _VID_
+    // O VID pode chegar no src, utm_term, utm_content ou até no sck
     const rawSrc = firstFilled(
       origin.src,
       tracking.src,
-      checkout.src
+      checkout.src,
+      findDeepValue(payload, ['src']),
+      findQueryParamAnywhere(payload, 'src')
     );
 
     const vid =
@@ -209,7 +344,11 @@ export async function hotmartRoutes(fastify) {
 
     let utmCampaign = firstFilled(
       tracking.utm_campaign,
-      tracking.campaign
+      tracking.campaign,
+      origin.utm_campaign,
+      checkout.utm_campaign,
+      findDeepValue(payload, ['utm_campaign', 'campaign']),
+      findQueryParamAnywhere(payload, 'utm_campaign')
     );
 
     const isNumericCampaign = /^\d+$/.test(utmCampaign);
@@ -226,7 +365,16 @@ export async function hotmartRoutes(fastify) {
     // Salva o VID se tiver, senão o utm_term limpo
     const termToSave = vid || utmTerm;
 
-    const checkoutParams = buildCheckoutParams({ tracking, origin, checkout });
+    const checkoutParams = {
+      ...buildCheckoutParams({ tracking, origin, checkout }),
+      extracted: {
+        sck,
+        sck_type: sckType,
+        raw_src: rawSrc,
+        vid,
+        utm_term_clean: utmTerm
+      }
+    };
 
     const { rows } = await db.query(
       'INSERT INTO purchases (' +
@@ -325,6 +473,8 @@ export async function hotmartRoutes(fastify) {
         utmCampaign +
         ' | sck:' +
         sck +
+        ' | sck_type:' +
+        sckType +
         ' | vid:' +
         vid +
         ' | fbp:' +
@@ -339,6 +489,7 @@ export async function hotmartRoutes(fastify) {
       campaign: utmCampaign,
       vid,
       sck,
+      sck_type: sckType,
       attribution
     });
   });
@@ -353,6 +504,7 @@ function detectChannel({ utmSource, utmMedium, fbclid, gclid, sck }) {
 
   if (sckValue) {
     if (sckValue.startsWith('ig')) return 'meta';
+    if (sckValue.includes('instagram')) return 'meta';
     if (sckValue.startsWith('fb')) return 'meta';
     if (sckValue.startsWith('meta')) return 'meta';
     if (sckValue.startsWith('an')) return 'meta';
@@ -361,6 +513,7 @@ function detectChannel({ utmSource, utmMedium, fbclid, gclid, sck }) {
     if (sckValue.startsWith('google')) return 'google';
 
     if (sckValue.startsWith('yt')) return 'other';
+    if (sckValue.includes('youtube')) return 'other';
 
     if (sckValue.startsWith('wa')) return 'whatsapp';
     if (sckValue.startsWith('wpp')) return 'whatsapp';
