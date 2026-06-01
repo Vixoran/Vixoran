@@ -5,6 +5,7 @@ import { eventsRoutes } from './routes/events.js';
 import { engagementRoutes } from './routes/engagement.js';
 import { attributionRoutes } from './routes/attribution.js';
 import { metaAdsRoutes } from './routes/metaAds.js';
+import { dashboardRoutes } from './routes/dashboard.js';
 import { db } from './db.js';
 
 const app = Fastify({ logger: true });
@@ -34,6 +35,7 @@ app.register(eventsRoutes,      { prefix: '/api' });
 app.register(engagementRoutes,  { prefix: '/api' });
 app.register(attributionRoutes, { prefix: '/api' });
 app.register(metaAdsRoutes,     { prefix: '/api' });
+app.register(dashboardRoutes,   { prefix: '/api' });
 
 // Roda migrations e sobe o servidor
 try {
