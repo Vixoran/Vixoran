@@ -87,7 +87,8 @@ export async function hotmartRoutes(fastify) {
     const sck = origin.sck || tracking.sck || tracking.source_sck || '';
 
     // O VID pode chegar no src OU no utm_term, com prefixo _VID_. Procura nos dois.
-    const rawSrc = tracking.src || '';
+    // CORRIGIDO: o src com _VID_/fbp chega em origin.src (não em tracking.src)
+    const rawSrc = origin.src || tracking.src || '';
     const vid = extractVid(rawSrc) || extractVid(rawUtmTerm) || extractVid(utmContent);
 
     // fbp = src sem a parte do VID
